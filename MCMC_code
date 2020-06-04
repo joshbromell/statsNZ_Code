@@ -1,0 +1,136 @@
+library(MASS)
+library(mnormt)
+library(matrixcalc)
+
+
+
+
+
+myMcmcReducedSigma <- function(p){
+  #Function which will create a random sample of data from a multivariate normal distribution using certain means and variances.
+  #Using bayes rule, we then run a MCMC in order to obtain draws from this distribution which then the sample mean and variance can be approximated from.
+  #the input variable is p and this is the proportion of the data which is decomposed with the vector a and the rest with the vector b 
+  
+  
+  
+  
+  #defined constants
+  epsillon <- .1 #alters the step size
+  N <- 10000 #length of the chain
+  #N = 200 #trial N
+  n = 3 #number of dimensions
+  start <- c(1,1,0) #x[1] value 
+  Psi <- diag(c(5,5))
+  mu = c(1,2)
+  
+  burnIn = 1000
+  
+  
+  #simulating the data 
+  dataN = 1000
+  muSim <- c(1,2)
+  sigSim <- diag(c(2,5))
+  data <- mvrnorm(dataN,muSim,sigSim)
+  
+  #reducing the data
+  m = p*dataN
+  a = c(1,0)
+  b = c(0,1)
+  
+  #initialising the matrix
+  x <- matrix(,nrow = n,ncol = N)
+  x[,1] <- start
+  
+  
+  for(i in 2:N){
+    k <- round(runif(1,1,2)) #picks a random dimension to be altered at each step
+    candidate <- x[k,i-1] + 2*epsillon*(runif(1)-0.5) #the propsed next step for that dimension
+    xcand <- x[,i-1]
+    xcand[k] <- candidate
+    alpha <- min(0,pieSig(xcand,Psi,mu,data,m,a,b) - pieSig(x[,i-1],Psi,mu,data,m,a,b)) #the prob that the proposition is accepted
+    alpha <- exp(alpha) #dealing with log likelihoods
+    u = runif(1)
+    
+    #acceptance of the propsed new step
+    if(u < alpha){
+      x[,i] <- x[,i-1]
+      x[k,i] <- candidate
+    }
+    #rejection, stays with the previous step
+    else{
+      x[,i] <- x[,i-1]
+    }
+  }
+  
+  par(mfrow=c(2,2)) #2x2 grid for plots
+  
+  plot(x[1,],ylim = c(0,3),type='l',main = paste("Sigma (1,1) chain, with p = ",p))
+  plot(x[2,],ylim = c(3,6),type='l',main = "Sigma (2,2) chain")
+  plot(x[3,],ylim = c(-3,3),type='l',main = "Sigma (1,2) chain")
+  
+  plot.new()
+  
+  hist(x[1,],main="Histogram of Sigma (1,1)")
+  hist(x[2,],main="Histogram of Sigma (2,2)")
+  hist(x[3,],main="Histogram of Sigma (2,1)")
+  
+  par(mfrow=c(1,1)) #changes the settings back
+  
+  
+  return(list(data,t(x[,burnIn:length(x[1,])])))
+}
+
+
+
+#calculates the posterior prob, using bayes 
+pieSig <- function(x,Psi,mu,data,m,a,b){
+  v=3
+  Sigma = matrix(c(x[1],x[3],x[3],x[2]),nrow=2)
+  ans = log(priorSig(Sigma,Psi,v)) + loglikelihoodSig(data,mu,Sigma,m,a,b)
+  return(ans)
+}
+
+loglikelihoodSig <- function(data,mu,Sigma,m,a,b){
+  ans = 0
+  #ensures the covariance matrix in the new proposed step is positive definite
+  if(is.positive.definite(Sigma)==TRUE){ #checks positive defitness for it to be suitable covariance matrix
+    for(i in 1:m){
+      ans = ans + dnorm(a%*%data[i,],a%*%mu,sqrt(a%*%Sigma%*%a),log=T)
+    }
+    for(j in (m+1):length(data[,1])){
+      ans = ans + dnorm(b%*%data[j,],b%*%mu,sqrt(b%*%Sigma%*%b),log=T)
+    }
+  }
+  return(ans)
+}
+
+#prior prob is from the inverse wishart distribution
+priorSig <- function(Sigma,Psi,v){
+  p = dim(Sigma)[1]
+  #ensures the covariance matrix in the new proposed step is positive definite
+  if(is.positive.definite(Sigma)==TRUE){
+    ans = (det(Psi)^(v/2)/(2^(v*p/2)*mgamma(v/2,p)))*det(Sigma)^(-(v+p+1)/2)*exp(-0.5*sum(diag(Psi%*%ginv(Sigma))))
+    return(ans)
+  }
+  #if not, will return a 0 probability and hence the step will be rejected
+  else{
+    return(0)
+  }
+}
+
+#the multi variate function which is required for the prior
+mgamma <- function(x,p){
+  prod = 1
+  for(j in 1:p){
+    prod = prod*gamma(x + 0.5*(1-j))
+  }
+  result = prod*pi^(p*(p-1)*0.25)
+  return(result)
+}
+
+
+
+
+
+
+
